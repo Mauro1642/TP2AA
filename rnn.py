@@ -73,6 +73,57 @@ class JointPunctCapitalModel(nn.Module):
         self.final_head = nn.Linear(hidden_dim, num_final)
         self.cap_head = nn.Linear(hidden_dim, num_cap)
 
+class JointPunctCapitalRNN(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        embed_dim: int,
+        hidden_dim: int,
+        num_init: int,
+        num_final: int,
+        num_cap: int,
+        n_layers: int = 1,
+        dropout: float = 0.3,
+        bidirectional: bool = True,     
+
+    ):
+        super().__init__()
+        # Embedding + input dropout
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.input_dropout = nn.Dropout(dropout)
+
+        # Bidirectional RNN
+        self.rnn = nn.RNN(
+            input_size=embed_dim,
+            hidden_size=hidden_dim if not bidirectional else hidden_dim // 2,
+            num_layers=n_layers,
+            dropout=dropout if n_layers > 1 else 0.0,
+            batch_first=True,
+            bidirectional=False
+        )
+
+        # Output dropout before heads
+        self.output_dropout = nn.Dropout(dropout)
+
+        # Three classification heads
+        self.init_head = nn.Linear(hidden_dim, num_init)
+        self.final_head = nn.Linear(hidden_dim, num_final)
+        self.cap_head = nn.Linear(hidden_dim, num_cap)
+
+    def forward(self, x):
+        # x: [B, T]
+        emb = self.embedding(x)           # [B, T, E]
+        emb = self.input_dropout(emb)
+
+        out, _ = self.rnn(emb)            # [B, T, H]
+        out = self.output_dropout(out)
+
+        init_logits = self.init_head(out)      # [B, T, num_init]
+        final_logits = self.final_head(out)    # [B, T, num_final]
+        cap_logits = self.cap_head(out)        # [B, T, num_cap]
+
+        return init_logits, final_logits, cap_logits
+
 
     def forward(self, x):
         # x: [B, T]
@@ -90,6 +141,7 @@ class JointPunctCapitalModel(nn.Module):
 class RNNPunctuationCapitalizationModel:
     def __init__(
         self,
+        model_cls=JointPunctCapitalModel,
         embed_dim: int = 128,
         hidden_dim: int = 256,
         n_layers: int = 2,
@@ -101,6 +153,7 @@ class RNNPunctuationCapitalizationModel:
         bidirectional: bool = True,         
         device: Optional[torch.device] = None,
     ):
+        self.model_cls = model_cls  # store class to instantiate later
         self.tokenizer = BertTokenizer.from_pretrained("google-bert/bert-base-multilingual-cased")
         self.tokenizer_fast = BertTokenizerFast.from_pretrained("google-bert/bert-base-multilingual-cased")
         self.embed_dim = embed_dim
@@ -218,17 +271,17 @@ class RNNPunctuationCapitalizationModel:
         
         # Initialize model
         vocab_size = self.tokenizer.vocab_size
-        self.model = JointPunctCapitalModel(
-            vocab_size=vocab_size,
-            embed_dim=self.embed_dim,
-            hidden_dim=self.hidden_dim,
-            num_init=self.num_init,
-            num_final=self.num_final,
-            num_cap=self.num_cap,
-            n_layers=self.n_layers,
-            dropout=self.dropout,
-            bidirectional=self.bidirectional,
-        ).to(self.device)
+        self.model = self.model_cls(
+                    vocab_size=self.tokenizer.vocab_size,
+                    embed_dim=self.embed_dim,
+                    hidden_dim=self.hidden_dim,
+                    num_init=self.num_init,
+                    num_final=self.num_final,
+                    num_cap=self.num_cap,
+                    n_layers=self.n_layers,
+                    dropout=self.dropout,
+                    bidirectional=self.bidirectional,
+                ).to(self.device)
         
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -567,7 +620,7 @@ class RNNPunctuationCapitalizationModel:
         self.batch_size = train_config["batch_size"]
         
         # Recreate model
-        self.model = JointPunctCapitalModel(
+        self.model = self.model_cls(
             vocab_size=config["vocab_size"],
             embed_dim=self.embed_dim,
             hidden_dim=self.hidden_dim,

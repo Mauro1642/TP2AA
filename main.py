@@ -4,11 +4,15 @@ import random
 import argparse
 
 from classic import ClassicPunctuationCapitalizationModel, evaluate_model
-from rnn import RNNPunctuationCapitalizationModel, evaluate_model_rnn
+from rnn import (
+    RNNPunctuationCapitalizationModel,
+    JointPunctCapitalModel,
+    JointPunctCapitalRNN,
+    evaluate_model_rnn,
+)
 from utils import split_data_from_file
 
 RANDOM_SEED = 0
-
 torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 
@@ -30,11 +34,14 @@ def main(mode: str, which: str):
 
         if which in ("rnn", "birnn", "both"):
             bidirectional = (which == "birnn")
-            rnn_model = RNNPunctuationCapitalizationModel(bidirectional=bidirectional)
+            model_class = JointPunctCapitalModel if bidirectional else JointPunctCapitalRNN
+            rnn_model = RNNPunctuationCapitalizationModel(
+                model_cls=model_class,
+                bidirectional=bidirectional,
+            )
             rnn_model.train(train_sentences, val_sentences, epochs=10)
             filename = "trained_birnn_model.pt" if bidirectional else "trained_rnn_model.pt"
             rnn_model.save_model(filename)
-
 
     elif mode == "test":
         print(f"Testing on {len(test_sentences)} instances")
@@ -42,26 +49,28 @@ def main(mode: str, which: str):
         if which in ("classic", "both"):
             classic_model = ClassicPunctuationCapitalizationModel()
             classic_model.load_model("classic_punct_model.pkl")
-            a = evaluate_model(classic_model, classic_model._prepare_data(test_sentences))
-            print(classic_model.predict_and_reconstruct("pasado mañana"))
-            print(classic_model.predict_and_reconstruct("estás asustado"))
-            print(classic_model.predict_and_reconstruct("cindy espero que estes muy orgullosa de lo que haz hecho"))
-            print(classic_model.predict_and_reconstruct("cómo estás"))
+            evaluate_model(classic_model, classic_model._prepare_data(test_sentences))
+            for text in [
+                "pasado mañana",
+                "estás asustado",
+                "cindy espero que estes muy orgullosa de lo que haz hecho",
+                "cómo estás"
+            ]:
+                print(classic_model.predict_and_reconstruct(text))
 
         if which in ("rnn", "birnn", "both"):
             bidirectional = (which == "birnn")
-            rnn_model = RNNPunctuationCapitalizationModel(bidirectional=bidirectional)
+            model_class = JointPunctCapitalModel if bidirectional else JointPunctCapitalRNN
+            rnn_model = RNNPunctuationCapitalizationModel(
+                model_cls=model_class,
+                bidirectional=bidirectional,
+            )
             filename = "trained_birnn_model.pt" if bidirectional else "trained_rnn_model.pt"
             rnn_model.load_model(filename)
 
-            # evaluate_model_rnn(rnn_model, test_sentences)
-            # print(rnn_model.predict_and_reconstruct("pasado mañana"))
-            # print(rnn_model.predict_and_reconstruct("estás asustado"))
-            # print(rnn_model.predict_and_reconstruct("cindy espero que estes muy orgullosa de lo que haz hecho"))
-
+            # Predict CSV
             input_csv = "datos_test.csv"
             output_csv = "predicted_output.csv"
-
             input_df = pd.read_csv(input_csv)
             rnn_model.predict_and_fill_csv(input_df, output_file=output_csv)
 
