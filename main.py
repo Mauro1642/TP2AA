@@ -16,7 +16,12 @@ RANDOM_SEED = 0
 torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 
-def main(mode: str, which: str):
+MODEL_CLASSES = {
+    "lstm": JointPunctCapitalModel,
+    "rnn": JointPunctCapitalRNN,
+}
+
+def main(mode: str, model_type: str, bidirectional: bool):
     train_sentences, val_sentences, test_sentences = split_data_from_file(
         "es_419_validas.txt",
         train_ratio=0.8,
@@ -27,26 +32,28 @@ def main(mode: str, which: str):
     if mode == "train":
         print(f"Training on {len(train_sentences)} instances, validating on {len(val_sentences)} instances")
 
-        if which in ("classic", "both"):
+        if model_type == "classic":
             classic_model = ClassicPunctuationCapitalizationModel()
             classic_model.train(train_sentences)
             classic_model.save_model("classic_punct_model.pkl")
 
-        if which in ("rnn", "birnn", "both"):
-            bidirectional = (which == "birnn")
-            model_class = JointPunctCapitalModel if bidirectional else JointPunctCapitalRNN
+        else:
+            model_cls = MODEL_CLASSES.get(model_type)
+            if model_cls is None:
+                raise ValueError(f"Unknown model type: {model_type}")
+            
             rnn_model = RNNPunctuationCapitalizationModel(
-                model_cls=model_class,
+                model_cls=model_cls,
                 bidirectional=bidirectional,
             )
             rnn_model.train(train_sentences, val_sentences, epochs=10)
-            filename = "trained_birnn_model.pt" if bidirectional else "trained_rnn_model.pt"
+            filename = f"trained_{'bi' if bidirectional else ''}{model_type}_model.pt"
             rnn_model.save_model(filename)
 
     elif mode == "test":
         print(f"Testing on {len(test_sentences)} instances")
 
-        if which in ("classic", "both"):
+        if model_type == "classic":
             classic_model = ClassicPunctuationCapitalizationModel()
             classic_model.load_model("classic_punct_model.pkl")
             evaluate_model(classic_model, classic_model._prepare_data(test_sentences))
@@ -58,14 +65,16 @@ def main(mode: str, which: str):
             ]:
                 print(classic_model.predict_and_reconstruct(text))
 
-        if which in ("rnn", "birnn", "both"):
-            bidirectional = (which == "birnn")
-            model_class = JointPunctCapitalModel if bidirectional else JointPunctCapitalRNN
+        else:
+            model_cls = MODEL_CLASSES.get(model_type)
+            if model_cls is None:
+                raise ValueError(f"Unknown model type: {model_type}")
+
             rnn_model = RNNPunctuationCapitalizationModel(
-                model_cls=model_class,
+                model_cls=model_cls,
                 bidirectional=bidirectional,
             )
-            filename = "trained_birnn_model.pt" if bidirectional else "trained_rnn_model.pt"
+            filename = f"trained_{'bi' if bidirectional else ''}{model_type}_model.pt"
             rnn_model.load_model(filename)
 
             # Predict CSV
@@ -86,10 +95,15 @@ if __name__ == "__main__":
         help="Mode: train models or test existing models"
     )
     parser.add_argument(
-        "--model",
-        choices=["classic", "rnn", "birnn", "both"],
-        default="both",
-        help="Which model(s) to train/test (default: both)"
+        "--model_type",
+        choices=["classic", "rnn", "lstm"],
+        default="lstm",
+        help="Type of model to use"
+    )
+    parser.add_argument(
+        "--bidirectional",
+        action="store_true",
+        help="Use bidirectional RNN/LSTM (ignored for classic model)"
     )
     args = parser.parse_args()
-    main(args.mode, args.model)
+    main(args.mode, args.model_type, args.bidirectional)

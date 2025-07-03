@@ -313,7 +313,7 @@ class RNNPunctuationCapitalizationModel:
 
                 self.optimizer.zero_grad()
 
-                with autocast("cuda"):
+                with autocast(device_type="cuda"):
                     init_logits, final_logits, cap_logits = self.model(input_ids)
 
                     loss_init = self.criterion(init_logits.view(-1, self.num_init), init_labs.view(-1))
